@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { workOrderSchema, type WorkOrderFormValues } from '@/lib/validations/manufacturing'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
-import { formatDate, generateCode } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, Clock, AlertCircle, CheckCircle2, X, Loader2, Download } from 'lucide-react'
 import type { WorkOrder, Product, BillOfMaterials, BomItem, Material } from '@/types/database'
@@ -150,12 +150,9 @@ export default function WorkOrdersPage() {
 
   const createMutation = useMutation({
     mutationFn: async (formData: WorkOrderFormValues) => {
-      const wo_number = 'WO' + generateCode('')
-
       const { error } = await supabase
         .from('work_orders')
         .insert([{
-          wo_number,
           product_id: formData.product_id,
           bom_id: formData.bom_id,
           quantity: formData.quantity,
@@ -207,59 +204,17 @@ export default function WorkOrdersPage() {
   const statusMutation = useMutation({
     mutationFn: async ({ wo, newStatus }: { wo: WorkOrderWithDetails, newStatus: 'in_progress' | 'completed' | 'cancelled' }) => {
       if (newStatus === 'completed') {
-        const bomItems = wo.bom?.items || []
-
-        const shortages: string[] = []
-        for (const item of bomItems) {
-          const totalNeeded = item.quantity * wo.quantity
-          const stock = item.material?.current_stock ?? 0
-          if (stock < totalNeeded) {
-            shortages.push(
-              `${formatMaterialLabel(item.material)}: butuh ${totalNeeded}, stok ${stock}`
-            )
-          }
-        }
-        if (shortages.length > 0) {
-          throw new Error(`Stok bahan baku tidak cukup:\n${shortages.join('\n')}`)
-        }
-
-        for (const item of bomItems) {
-          const qtyToDeduct = item.quantity * wo.quantity
-          const { error: matMoveError } = await supabase
-            .from('stock_movements')
-            .insert([{
-              material_id: item.material_id,
-              movement_type: 'production_out',
-              quantity: -qtyToDeduct,
-              reference_id: wo.id,
-              reference_type: 'work_order',
-              notes: `Bahan baku produksi WO ${wo.wo_number}`,
-              stock_before: 0,
-              stock_after: 0
-            }])
-          if (matMoveError) throw matMoveError
-        }
-
-        const { error: prodMoveError } = await supabase
-          .from('stock_movements')
-          .insert([{
-            product_id: wo.product_id,
-            movement_type: 'production_in',
-            quantity: wo.quantity,
-            reference_id: wo.id,
-            reference_type: 'work_order',
-            notes: `Produk selesai dari WO ${wo.wo_number}`,
-            stock_before: 0,
-            stock_after: 0
-          }])
-        if (prodMoveError) throw prodMoveError
+        // Cek stok, mutasi bahan/produk, dan status WO diproses atomik di database (lihat migration 007)
+        const { error } = await supabase.rpc('complete_work_order', { p_wo_id: wo.id })
+        if (error) throw error
+        return
       }
 
       const { error: woError } = await supabase
         .from('work_orders')
         .update({
           status: newStatus,
-          completed_date: newStatus === 'completed' ? new Date().toISOString().split('T')[0] : null,
+          completed_date: null,
           updated_at: new Date().toISOString()
         })
         .eq('id', wo.id)

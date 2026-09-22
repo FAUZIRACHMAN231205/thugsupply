@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { purchaseOrderSchema, type PurchaseOrderFormValues } from '@/lib/validations/inventory'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
-import { formatCurrency, formatDate, generateCode } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, CheckCircle, XCircle, X, Loader2, Trash2, Download } from 'lucide-react'
 import type { PurchaseOrder, PurchaseOrderItem, Material } from '@/types/database'
@@ -107,13 +107,11 @@ export default function PurchaseOrdersPage() {
 
   const createMutation = useMutation({
     mutationFn: async (formData: PurchaseOrderFormValues) => {
-      const po_number = generateCode('PO')
       const total_amount = calculateTotal()
 
       const { data: poData, error: poError } = await supabase
         .from('purchase_orders')
         .insert([{
-          po_number,
           supplier_id: formData.supplier_id,
           order_date: formData.order_date,
           expected_date: formData.expected_date || null,
@@ -166,28 +164,10 @@ export default function PurchaseOrdersPage() {
   const statusMutation = useMutation({
     mutationFn: async ({ po, newStatus }: { po: PurchaseOrder, newStatus: 'sent' | 'confirmed' | 'received' | 'cancelled' }) => {
       if (newStatus === 'received') {
-        const items = po.items || []
-        for (const item of items) {
-          const { error: moveError } = await supabase
-            .from('stock_movements')
-            .insert([{
-              material_id: item.material_id,
-              movement_type: 'purchase_in',
-              quantity: item.quantity,
-              reference_id: po.id,
-              reference_type: 'purchase_order',
-              notes: `Diterima dari PO ${po.po_number}`,
-              stock_before: 0,
-              stock_after: 0
-            }])
-          if (moveError) throw moveError
-
-          const { error: itemUpdateError } = await supabase
-            .from('purchase_order_items')
-            .update({ received_quantity: item.quantity })
-            .eq('id', item.id)
-          if (itemUpdateError) throw itemUpdateError
-        }
+        // Stok masuk + status PO diproses atomik di database (lihat migration 007)
+        const { error } = await supabase.rpc('receive_purchase_order', { p_po_id: po.id })
+        if (error) throw error
+        return
       }
 
       const { error: poError } = await supabase
@@ -206,7 +186,7 @@ export default function PurchaseOrdersPage() {
     },
     onError: (err) => {
       console.error('Error updating PO status:', err)
-      alert('Gagal memperbarui status Purchase Order')
+      alert(err?.message || 'Gagal memperbarui status Purchase Order')
     }
   })
 

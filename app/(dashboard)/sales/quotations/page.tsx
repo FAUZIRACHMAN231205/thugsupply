@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { quotationSchema, type QuotationFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
-import { formatCurrency, formatDate, generateCode } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, X, Loader2, Trash2, Printer } from 'lucide-react'
 import type { Quotation, QuotationItem } from '@/types/database'
@@ -118,13 +118,11 @@ export default function QuotationsPage() {
 
   const createMutation = useMutation({
     mutationFn: async (formData: QuotationFormValues) => {
-      const quotation_number = generateCode('QUO')
       const { subtotal, tax_amount, total_amount } = calculateTotals()
 
       const { data: quoData, error: quoError } = await supabase
         .from('quotations')
         .insert([{
-          quotation_number,
           customer_id: formData.customer_id,
           issue_date: formData.issue_date,
           valid_until: formData.valid_until,

@@ -41,6 +41,17 @@ supabase/migrations/002_security_and_fixes.sql
 supabase/migrations/003_add_material_size.sql
 supabase/migrations/004_material_size_constraints.sql
 supabase/migrations/005_product_size.sql
+supabase/migrations/006_admin_rls.sql
+supabase/migrations/007_transactional_rpcs.sql
+supabase/migrations/008_stock_guard_and_numbering.sql
+```
+
+5. Beri role admin ke akun Anda (hanya admin yang bisa login dan mengakses data), lalu logout-login ulang:
+
+```sql
+UPDATE auth.users
+SET raw_app_meta_data = raw_app_meta_data || '{"role":"admin"}'
+WHERE email = 'email-anda@contoh.com';
 ```
 
 ### 3. Jalankan Development Server

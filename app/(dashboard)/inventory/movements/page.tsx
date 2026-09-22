@@ -98,9 +98,7 @@ export default function MovementsPage() {
       const movementRow: Partial<import('@/types/database').StockMovement> = {
         movement_type: 'adjustment',
         quantity: formData.quantity,
-        notes: formData.notes || 'Manual Adjustment',
-        stock_before: 0,
-        stock_after: 0
+        notes: formData.notes || 'Manual Adjustment'
       }
 
       if (formData.item_type === 'material') {
@@ -121,7 +119,7 @@ export default function MovementsPage() {
     },
     onError: (err) => {
       console.error('Error creating adjustment:', err)
-      alert('Gagal membuat penyesuaian stok')
+      alert(err?.message || 'Gagal membuat penyesuaian stok')
     }
   })
 

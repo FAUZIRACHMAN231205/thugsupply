@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { journalEntrySchema, type JournalEntryFormValues } from '@/lib/validations/accounting'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
-import { formatCurrency, formatDate, generateCode } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, X, Loader2, ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react'
 
 import { exportToCSV } from '@/lib/export'
@@ -138,12 +138,10 @@ export default function JournalPage() {
   const submitMutation = useMutation({
     mutationFn: async (formData: JournalEntryFormValues) => {
       const { totalDebit, totalCredit } = calculateSums()
-      const entry_number = 'JE' + generateCode('')
 
       const { data: entryData, error: entryErr } = await supabase
         .from('journal_entries')
         .insert([{
-          entry_number,
           entry_date: formData.entry_date,
           entry_type: formData.entry_type,
           description: formData.description,

@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { invoiceSchema, type InvoiceFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
-import { formatCurrency, formatDate, generateCode } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, DollarSign, XCircle, X, Loader2, Trash2, Printer } from 'lucide-react'
 import type { Invoice, InvoiceItem } from '@/types/database'
@@ -127,13 +127,11 @@ export default function InvoicesPage() {
 
   const createMutation = useMutation({
     mutationFn: async (formData: InvoiceFormValues) => {
-      const invoice_number = generateCode('INV')
       const { subtotal, tax_amount, total_amount } = calculateTotals()
 
       const { data: invData, error: invError } = await supabase
         .from('invoices')
         .insert([{
-          invoice_number,
           customer_id: formData.customer_id,
           issue_date: formData.issue_date,
           due_date: formData.due_date,
@@ -193,69 +191,9 @@ export default function InvoicesPage() {
 
   const paymentMutation = useMutation({
     mutationFn: async (inv: Invoice) => {
-      const items = inv.items || []
-
-      if (inv.sale_type === 'ready_stock') {
-        for (const item of items) {
-          const { error: moveError } = await supabase
-            .from('stock_movements')
-            .insert([{
-              product_id: item.product_id,
-              movement_type: 'sale_out',
-              quantity: -item.quantity,
-              reference_id: inv.id,
-              reference_type: 'invoice',
-              notes: `Penjualan lunas Invoice ${inv.invoice_number}`,
-              stock_before: 0,
-              stock_after: 0
-            }])
-
-          if (moveError) throw moveError
-        }
-      } else if (inv.sale_type === 'pre_order') {
-        for (const item of items) {
-          const { data: bomData, error: bomErr } = await supabase
-            .from('bill_of_materials')
-            .select('id')
-            .eq('product_id', item.product_id)
-            .eq('is_active', true)
-            .limit(1)
-
-          if (bomErr) throw bomErr
-          const bomId = bomData && bomData[0] ? bomData[0].id : null
-
-          if (!bomId) {
-            console.warn(`Peringatan: Tidak ditemukan BOM aktif untuk produk ID ${item.product_id}. Work Order akan dibuat tanpa BOM default.`)
-          }
-
-          const { error: woError } = await supabase
-            .from('work_orders')
-            .insert([{
-              wo_number: 'WO-PRE-' + generateCode(''),
-              product_id: item.product_id,
-              bom_id: bomId,
-              quantity: item.quantity,
-              status: 'draft',
-              order_type: 'pre_order',
-              start_date: new Date().toISOString().split('T')[0],
-              target_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              notes: `Pre-order otomatis dari Invoice lunas ${inv.invoice_number}`
-            }])
-
-          if (woError) throw woError
-        }
-      }
-
-      const { error: invError } = await supabase
-        .from('invoices')
-        .update({
-          status: 'paid',
-          paid_amount: inv.total_amount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', inv.id)
-
-      if (invError) throw invError
+      // Mutasi stok (ready_stock) / pembuatan WO (pre_order) + status lunas diproses atomik di database (lihat migration 007)
+      const { error } = await supabase.rpc('pay_invoice', { p_invoice_id: inv.id })
+      if (error) throw error
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices_data'] })
@@ -263,7 +201,7 @@ export default function InvoicesPage() {
     },
     onError: (err) => {
       console.error('Error processing payment:', err)
-      alert('Gagal memproses pembayaran invoice')
+      alert(err?.message || 'Gagal memproses pembayaran invoice')
     }
   })
 
