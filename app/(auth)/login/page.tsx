@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { isAdminUser } from '@/lib/auth/roles'
 import { Loader2, Mail, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -29,6 +30,10 @@ function LoginFormContent() {
       setTimeout(() => {
         setError('Autentikasi gagal. Silakan coba masuk kembali.')
       }, 0)
+    } else if (errorParam === 'unauthorized') {
+      setTimeout(() => {
+        setError('Akun Anda belum memiliki akses admin untuk masuk ke sistem ini.')
+      }, 0)
     }
   }, [searchParams])
 
@@ -39,7 +44,7 @@ function LoginFormContent() {
     setInfoMessage(null)
 
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
@@ -51,11 +56,20 @@ function LoginFormContent() {
         setShowResendOption(true)
       } else if (error.message === 'Invalid login credentials') {
         setError('Email atau password salah.')
+      } else if (error.message === 'Failed to fetch') {
+        setError('Tidak bisa menghubungi server autentikasi Supabase. Periksa koneksi internet dan konfigurasi NEXT_PUBLIC_SUPABASE_URL di .env.local.')
       } else {
         setError(`Gagal login: ${error.message}`)
       }
       setLoading(false)
     } else {
+      if (!isAdminUser(data.user)) {
+        await supabase.auth.signOut()
+        setError('Akun Anda belum memiliki akses admin untuk masuk ke sistem ini.')
+        setLoading(false)
+        return
+      }
+
       console.log('Login success, redirecting...')
       // Menggunakan window.location untuk force hard reload agar cookie terbaca sempurna oleh server/middleware
       window.location.href = '/dashboard'
