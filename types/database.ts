@@ -299,6 +299,21 @@ export interface MonthlyProfitSummary {
   expense: number
 }
 
+// Hasil RPC dashboard_summary (migration 011)
+export interface DashboardSummary {
+  revenue_month: number
+  revenue_prev_month: number
+  purchase_month: number
+  purchase_prev_month: number
+  active_work_orders: number
+  pending_invoices: number
+  pending_quotations: number
+  total_customers: number
+  total_suppliers: number
+  low_stock_items: number
+  low_stock_materials: Pick<Material, 'id' | 'code' | 'name' | 'size' | 'unit' | 'current_stock' | 'reorder_point'>[]
+}
+
 // Akun yang dipakai jurnal otomatis (migration 009)
 export interface AccountMapping {
   key: string

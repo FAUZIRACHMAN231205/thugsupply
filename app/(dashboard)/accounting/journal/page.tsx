@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Fragment, useState } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useForm, useFieldArray, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { journalEntrySchema, type JournalEntryFormValues } from '@/lib/validations/accounting'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, X, Loader2, ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react'
+import { Plus, X, Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Download } from 'lucide-react'
 
 import { exportToCSV } from '@/lib/export'
+import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 
 const typeColors: Record<string, string> = {
   sale: '#22c55e',
@@ -26,6 +27,29 @@ const typeLabels: Record<string, string> = {
   production: 'Produksi',
   manual: 'Manual',
   adjustment: 'Penyesuaian'
+}
+
+const PAGE_SIZE = 25
+const EXPORT_BATCH_SIZE = 500
+
+interface JournalFilters {
+  from: string
+  to: string
+  type: string
+}
+
+// Entri terbaru dulu; created_at & id sebagai pengurut tambahan agar urutan antar halaman stabil
+function buildJournalQuery(filters: JournalFilters) {
+  let query = supabase
+    .from('journal_entries')
+    .select('*, lines:journal_lines(*, account:chart_of_accounts(*))', { count: 'exact' })
+  if (filters.from) query = query.gte('entry_date', filters.from)
+  if (filters.to) query = query.lte('entry_date', filters.to)
+  if (filters.type) query = query.eq('entry_type', filters.type)
+  return query
+    .order('entry_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
 }
 
 const accountTypeLabels: Record<string, string> = {
@@ -59,33 +83,44 @@ export default function JournalPage() {
   const { fields, append, remove } = useFieldArray({ control, name: 'lines' })
   const watchLines = useWatch({ control, name: 'lines' }) || []
 
-  const { data, isLoading: loading } = useQuery({
-    queryKey: ['journal_entries_data'],
+  // Paginasi & filter daftar jurnal
+  const [page, setPage] = useState(0)
+  const [filters, setFilters] = useState<JournalFilters>({ from: '', to: '', type: '' })
+  const [exporting, setExporting] = useState(false)
+
+  const updateFilter = (key: keyof JournalFilters, value: string) => {
+    setFilters(prev => ({ ...prev, [key]: value }))
+    setPage(0)
+  }
+
+  const { data, isLoading: loading, isFetching } = useQuery({
+    queryKey: ['journal_entries_data', 'list', page, filters],
     queryFn: async () => {
-      const [journalRes, accountsRes] = await Promise.all([
-        supabase
-          .from('journal_entries')
-          .select('*, lines:journal_lines(*, account:chart_of_accounts(*))')
-          .order('entry_date', { ascending: false }),
-        supabase
-          .from('chart_of_accounts')
-          .select('*')
-          .eq('is_active', true)
-          .order('code', { ascending: true })
-      ])
+      const from = page * PAGE_SIZE
+      const { data, error, count } = await buildJournalQuery(filters).range(from, from + PAGE_SIZE - 1)
+      if (error) throw error
+      return { journals: data || [], total: count ?? 0 }
+    },
+    placeholderData: keepPreviousData
+  })
 
-      if (journalRes.error) throw journalRes.error
-      if (accountsRes.error) throw accountsRes.error
-
-      return {
-        journals: journalRes.data || [],
-        accounts: accountsRes.data || []
-      }
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['journal_entries_data', 'accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('chart_of_accounts')
+        .select('*')
+        .eq('is_active', true)
+        .order('code', { ascending: true })
+      if (error) throw error
+      return data || []
     }
   })
 
   const journals = data?.journals || []
-  const accounts = data?.accounts || []
+  const total = data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const hasFilters = !!(filters.from || filters.to || filters.type)
 
   // Toggle expanded entry row
   const toggleExpand = (id: string) => {
@@ -169,13 +204,12 @@ export default function JournalPage() {
       if (linesErr) throw linesErr
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['journal_entries_data'] })
-      queryClient.invalidateQueries({ queryKey: ['chart_of_accounts_data'] })
+      invalidatePostingQueries(queryClient)
       setIsOpen(false)
     },
     onError: (err) => {
       console.error('Error saving journal entry:', err)
-      alert('Gagal menyimpan jurnal akuntansi')
+      alert(err?.message || 'Gagal menyimpan jurnal akuntansi')
     }
   })
 
@@ -193,11 +227,31 @@ export default function JournalPage() {
   const { totalDebit: currentDebit, totalCredit: currentCredit } = calculateSums()
   const isBalanced = currentDebit > 0 && currentDebit === currentCredit
 
-  const handleExport = () => {
+  // Ekspor semua jurnal yang cocok dengan filter (bukan hanya halaman ini), diambil bertahap
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const allJournals: typeof journals = []
+      for (let from = 0; ; from += EXPORT_BATCH_SIZE) {
+        const { data, error } = await buildJournalQuery(filters).range(from, from + EXPORT_BATCH_SIZE - 1)
+        if (error) throw error
+        allJournals.push(...(data || []))
+        if (!data || data.length < EXPORT_BATCH_SIZE) break
+      }
+      exportJournals(allJournals)
+    } catch (err) {
+      console.error('Error exporting journals:', err)
+      alert('Gagal mengekspor jurnal')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const exportJournals = (entries: typeof journals) => {
     const headers = ['No Jurnal', 'Tanggal', 'Keterangan', 'Jenis', 'Akun', 'Debit', 'Kredit']
     const csvData: (string | number)[][] = []
 
-    journals.forEach(je => {
+    entries.forEach(je => {
       const typeStr = typeLabels[je.entry_type] || je.entry_type
       
       // If there are no lines somehow, just add the header
@@ -239,13 +293,43 @@ export default function JournalPage() {
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Catatan transaksi double-entry bookkeeping</div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button onClick={handleExport} className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-              <Download size={14} /> Export Excel
+            <button onClick={handleExport} disabled={exporting || total === 0} className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Export Excel
             </button>
             <button onClick={handleCreateOpen} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
               <Plus size={14} /> Jurnal Manual
             </button>
           </div>
+        </div>
+
+        {/* Filter */}
+        <div className="flex flex-wrap items-end gap-3 px-5 py-3 border-b border-slate-800">
+          <div>
+            <label className="form-label">Dari Tanggal</label>
+            <input type="date" value={filters.from} onChange={(e) => updateFilter('from', e.target.value)} className="input-base" />
+          </div>
+          <div>
+            <label className="form-label">Sampai Tanggal</label>
+            <input type="date" value={filters.to} onChange={(e) => updateFilter('to', e.target.value)} className="input-base" />
+          </div>
+          <div>
+            <label className="form-label">Jenis</label>
+            <select value={filters.type} onChange={(e) => updateFilter('type', e.target.value)} className="input-base" style={{ background: '#0f172a' }}>
+              <option value="">Semua jenis</option>
+              {Object.entries(typeLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={() => { setFilters({ from: '', to: '', type: '' }); setPage(0) }}
+              className="btn btn-secondary btn-sm"
+            >
+              Reset Filter
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -254,7 +338,7 @@ export default function JournalPage() {
             <span>Memuat jurnal...</span>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto', opacity: isFetching ? 0.6 : 1, transition: 'opacity 150ms' }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -270,14 +354,16 @@ export default function JournalPage() {
               <tbody>
                 {journals.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>Belum ada data jurnal.</td>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+                      {hasFilters ? 'Tidak ada jurnal yang cocok dengan filter.' : 'Belum ada data jurnal.'}
+                    </td>
                   </tr>
                 ) : (
                   journals.map((je) => {
                     const isExpanded = !!expandedEntries[je.id]
                     return (
-                      <>
-                        <tr key={je.id} onClick={() => toggleExpand(je.id)} style={{ cursor: 'pointer' }}>
+                      <Fragment key={je.id}>
+                        <tr onClick={() => toggleExpand(je.id)} style={{ cursor: 'pointer' }}>
                           <td>
                             {isExpanded ? <ChevronUp size={14} style={{ color: '#64748b' }} /> : <ChevronDown size={14} style={{ color: '#64748b' }} />}
                           </td>
@@ -331,12 +417,42 @@ export default function JournalPage() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     )
                   })
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Paginasi */}
+        {total > 0 && (
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-5 py-3 border-t border-slate-800" style={{ fontSize: '0.75rem', color: '#64748b' }}>
+            <span>
+              Menampilkan {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} dari {total} jurnal
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0 || isFetching}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                <ChevronLeft size={14} /> Sebelumnya
+              </button>
+              <span>Halaman {page + 1} / {pageCount}</span>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+                disabled={page >= pageCount - 1 || isFetching}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                Berikutnya <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { formatMonthLabel } from '@/lib/reports'
-import type { MonthlyProfitSummary } from '@/types/database'
+import type { DashboardSummary, MonthlyProfitSummary } from '@/types/database'
 import StatusBadge from '@/components/ui/StatusBadge'
 import PageSkeleton from '@/components/ui/PageSkeleton'
 import {
@@ -81,105 +81,67 @@ function StatCard({ label, value, icon, trend, color, href }: StatCardProps) {
   return <>{cardContent}</>
 }
 
+// Persentase perubahan dibanding bulan lalu; tidak ditampilkan jika bulan lalu 0
+function computeTrend(current: number, previous: number): StatCardProps['trend'] {
+  if (!previous) return undefined
+  const pct = ((current - previous) / Math.abs(previous)) * 100
+  return { value: `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`, up: pct >= 0 }
+}
+
 export default function DashboardPage() {
   const { data, isLoading: loading, error, refetch } = useQuery({
     queryKey: ['dashboard_data'],
     queryFn: async () => {
-      const startOfMonth = new Date()
-      startOfMonth.setDate(1)
-      startOfMonth.setHours(0, 0, 0, 0)
-      const startOfMonthStr = startOfMonth.toISOString().split('T')[0]
-
-      // ✅ Semua 9 query jalan PARALEL dengan Promise.all
       try {
-        const [
-          invoicesRes,
-          poRes,
-          woRes,
-          matRes,
-          pendingInvRes,
-          quoRes,
-          custRes,
-          suppRes,
-          monthlyRes,
-        ] = await Promise.all([
-          supabase.from('invoices').select('total_amount, issue_date').gte('issue_date', startOfMonthStr),
-          supabase.from('purchase_orders').select('total_amount').gte('order_date', startOfMonthStr).eq('status', 'received'),
-          supabase.from('work_orders').select('*, product:products(name, code)').eq('status', 'in_progress').order('created_at', { ascending: false }).limit(5),
-          supabase.from('materials').select('*').eq('is_active', true),
-          supabase.from('invoices').select('*, customer:customers(name)').in('status', ['sent', 'overdue', 'partial']).order('due_date', { ascending: true }).limit(5),
-          supabase.from('quotations').select('*', { count: 'exact', head: true }).in('status', ['draft', 'sent']),
-          supabase.from('customers').select('*', { count: 'exact', head: true }).eq('is_active', true),
-          supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        const [summaryRes, woRes, pendingInvRes, monthlyRes] = await Promise.all([
+          // Semua angka kartu dihitung di database (lihat migration 011)
+          supabase.rpc('dashboard_summary'),
+          supabase.from('work_orders').select('*, product:products(name, code)').eq('status', 'in_progress').order('created_at', { ascending: false }).limit(4),
+          supabase.from('invoices').select('*, customer:customers(name)').in('status', ['sent', 'overdue', 'partial']).order('due_date', { ascending: true }).limit(4),
           // Ringkasan bulanan dihitung di database (lihat migration 010)
           supabase.rpc('monthly_profit_summary', { p_months: 5 }),
-        ]);
+        ])
 
-        // Cek error dari semua query
-        const errors = [invoicesRes, poRes, woRes, matRes, pendingInvRes, quoRes, custRes, suppRes, monthlyRes]
+        const errors = [summaryRes, woRes, pendingInvRes, monthlyRes]
           .filter(r => r.error)
           .map(r => r.error!.message)
-        
+
         if (errors.length > 0) {
-          console.error('Ada error di query Supabase:', errors);
-          throw new Error(errors.join('; '));
+          console.error('Ada error di query Supabase:', errors)
+          throw new Error(errors.join('; '))
         }
 
-      // Hitung revenue bulan ini
-      const monthlyRevenue = (invoicesRes.data || []).reduce(
-        (sum, inv) => sum + (Number(inv.total_amount) || 0), 0
-      )
+        const summary = summaryRes.data as DashboardSummary
+        const revenueMonth = Number(summary.revenue_month) || 0
+        const purchaseMonth = Number(summary.purchase_month) || 0
 
-      // Hitung total pembelian bulan ini
-      const monthlyPurchase = (poRes.data || []).reduce(
-        (sum, po) => sum + (Number(po.total_amount) || 0), 0
-      )
+        const rawChart = ((monthlyRes.data || []) as MonthlyProfitSummary[]).map(m => ({
+          month: formatMonthLabel(m.month),
+          pendapatan: Number(m.revenue) || 0,
+          hppb: Number(m.cogs) || 0,
+        }))
 
-      // Filter low stock materials
-      const allMaterials = matRes.data || []
-      const lowMaterials = allMaterials.filter(
-        m => (m.current_stock || 0) <= (m.reorder_point || 0)
-      )
-
-      // Grafik 5 bulan terakhir dari jurnal
-      const monthly = ((monthlyRes.data || []) as MonthlyProfitSummary[]).map(m => ({
-        month: m.month,
-        revenue: Number(m.revenue) || 0,
-        cogs: Number(m.cogs) || 0,
-      }))
-
-      // Jika belum ada jurnal sama sekali (Supabase baru), pakai total invoice
-      // bulan ini sebagai proxy pendapatan
-      const hasJournal = monthly.some(m => m.revenue !== 0 || m.cogs !== 0)
-      if (!hasJournal && monthly.length > 0) {
-        monthly[monthly.length - 1].revenue = monthlyRevenue
-      }
-
-      const rawChart = monthly.map(m => ({
-        month: formatMonthLabel(m.month),
-        pendapatan: m.revenue,
-        hppb: m.cogs,
-      }))
-
-      return {
-        stats: {
-          total_revenue_month: monthlyRevenue,
-          total_purchase_month: monthlyPurchase,
-          active_work_orders: (woRes.data || []).length,
-          low_stock_items: lowMaterials.length,
-          pending_invoices: (pendingInvRes.data || []).length,
-          pending_quotations: quoRes.count || 0,
-          total_customers: custRes.count || 0,
-          total_suppliers: suppRes.count || 0,
-        },
-        lowStockMaterials: lowMaterials.slice(0, 4),
-        pendingInvoices: (pendingInvRes.data || []).slice(0, 4),
-        activeWOs: (woRes.data || []).slice(0, 4),
-        chartData: rawChart
-      }
+        return {
+          stats: {
+            total_revenue_month: revenueMonth,
+            total_purchase_month: purchaseMonth,
+            active_work_orders: summary.active_work_orders,
+            low_stock_items: summary.low_stock_items,
+            pending_invoices: summary.pending_invoices,
+            pending_quotations: summary.pending_quotations,
+            total_customers: summary.total_customers,
+            total_suppliers: summary.total_suppliers,
+          },
+          revenueTrend: computeTrend(revenueMonth, Number(summary.revenue_prev_month) || 0),
+          purchaseTrend: computeTrend(purchaseMonth, Number(summary.purchase_prev_month) || 0),
+          lowStockMaterials: summary.low_stock_materials || [],
+          pendingInvoices: pendingInvRes.data || [],
+          activeWOs: woRes.data || [],
+          chartData: rawChart
+        }
       } catch (err: unknown) {
-        console.error('FATAL ERROR saat memuat data:', err);
-        throw new Error((err as Error).message || 'Terjadi kesalahan sistem yang tidak diketahui saat memuat data');
+        console.error('FATAL ERROR saat memuat data:', err)
+        throw new Error((err as Error).message || 'Terjadi kesalahan sistem yang tidak diketahui saat memuat data')
       }
     }
   })
@@ -257,7 +219,7 @@ export default function DashboardPage() {
           label="Pendapatan Bulan Ini"
           value={formatCurrency(stats.total_revenue_month)}
           icon={<TrendingUp size={18} />}
-          trend={{ value: '+12.4%', up: true }}
+          trend={data?.revenueTrend}
           color="#c9a84c"
           href="/sales/invoices"
         />
@@ -265,7 +227,7 @@ export default function DashboardPage() {
           label="Pembelian Bulan Ini"
           value={formatCurrency(stats.total_purchase_month)}
           icon={<ShoppingCart size={18} />}
-          trend={{ value: '+8.2%', up: false }}
+          trend={data?.purchaseTrend}
           color="#3b82f6"
           href="/inventory/purchase-orders"
         />
