@@ -12,6 +12,7 @@ import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, DollarSign, XCircle, X, Loader2, Trash2, Printer } from 'lucide-react'
 import type { Invoice, InvoiceItem } from '@/types/database'
 import { formatProductLabel } from '@/lib/inventory-size'
+import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 
 export default function InvoicesPage() {
   const queryClient = useQueryClient()
@@ -196,7 +197,7 @@ export default function InvoicesPage() {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices_data'] })
+      invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
     },
     onError: (err) => {

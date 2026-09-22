@@ -19,6 +19,7 @@ type WorkOrderWithDetails = WorkOrder & {
   }
 }
 import { exportToCSV } from '@/lib/export'
+import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 import { formatMaterialLabel, formatProductLabel } from '@/lib/inventory-size'
 
 const stages = ['Cutting', 'Sewing', 'Finishing', 'QC', 'Packaging']
@@ -222,7 +223,7 @@ export default function WorkOrdersPage() {
       if (woError) throw woError
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['work_orders_data'] })
+      invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
     },
     onError: (err: Error) => {

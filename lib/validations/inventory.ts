@@ -59,6 +59,7 @@ export const purchaseOrderSchema = z.object({
   supplier_id: z.string().min(1, 'Supplier wajib dipilih'),
   order_date: z.string().min(1, 'Tanggal pemesanan wajib diisi'),
   expected_date: z.string().optional(),
+  payment_term: z.enum(['credit', 'cash']),
   notes: z.string().optional(),
   items: z.array(poItemSchema).min(1, 'Minimal satu item material wajib ditambahkan'),
 })

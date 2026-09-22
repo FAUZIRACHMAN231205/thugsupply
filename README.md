@@ -44,7 +44,10 @@ supabase/migrations/005_product_size.sql
 supabase/migrations/006_admin_rls.sql
 supabase/migrations/007_transactional_rpcs.sql
 supabase/migrations/008_stock_guard_and_numbering.sql
+supabase/migrations/009_auto_journal.sql
 ```
+
+   Migration 009 membuat jurnal otomatis dari pembelian, produksi, dan penjualan. Akun yang dipakai bisa diubah di **Akuntansi → Chart of Accounts → Akun Jurnal Otomatis**.
 
 5. Beri role admin ke akun Anda (hanya admin yang bisa login dan mengakses data), lalu logout-login ulang:
 

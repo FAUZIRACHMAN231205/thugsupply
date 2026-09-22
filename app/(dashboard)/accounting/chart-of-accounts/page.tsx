@@ -8,8 +8,8 @@ import { coaSchema, type CoaFormValues } from '@/lib/validations/accounting'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency } from '@/lib/utils'
-import { Plus, BookOpen, X, Loader2 } from 'lucide-react'
-import type { ChartOfAccount, AccountType } from '@/types/database'
+import { Plus, BookOpen, X, Loader2, Link2 } from 'lucide-react'
+import type { ChartOfAccount, AccountType, AccountMapping } from '@/types/database'
 
 const accountTypeLabels: Record<AccountType, string> = {
   asset: 'Aktiva',
@@ -25,6 +25,96 @@ const accountTypeColors: Record<AccountType, string> = {
   equity: '#a855f7',
   revenue: '#22c55e',
   expense: '#f59e0b',
+}
+
+// Akun yang dipakai jurnal otomatis (terima PO, bayar supplier, selesai WO, invoice lunas)
+function AutoJournalAccounts({ accounts }: { accounts: ChartOfAccount[] }) {
+  const queryClient = useQueryClient()
+
+  const { data: mappings = [], isLoading } = useQuery({
+    queryKey: ['account_mappings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('account_mappings')
+        .select('*')
+        .order('sort_order', { ascending: true })
+      if (error) throw error
+      return (data || []) as AccountMapping[]
+    }
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ key, account_id }: { key: string; account_id: string | null }) => {
+      const { error } = await supabase
+        .from('account_mappings')
+        .update({ account_id })
+        .eq('key', key)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['account_mappings'] })
+    },
+    onError: (err) => {
+      console.error('Error updating account mapping:', err)
+      alert(err?.message || 'Gagal menyimpan pemetaan akun')
+    }
+  })
+
+  const unmappedCount = mappings.filter(m => !m.account_id).length
+
+  return (
+    <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: '0.75rem', overflow: 'hidden' }}>
+      <div style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(201,168,76,0.05)' }}>
+        <Link2 size={16} style={{ color: '#c9a84c' }} />
+        <span style={{ fontWeight: 700, color: '#c9a84c', fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Akun Jurnal Otomatis
+        </span>
+        {unmappedCount > 0 && (
+          <span className="badge badge-danger" style={{ marginLeft: 'auto' }}>{unmappedCount} belum diatur</span>
+        )}
+      </div>
+      <div style={{ padding: '0.75rem 1.25rem', fontSize: '0.75rem', color: '#64748b', borderBottom: '1px solid #1e293b' }}>
+        Dipakai saat terima PO, bayar supplier, selesai Work Order, dan invoice lunas. Transaksi tersebut ditolak selama ada akun yang belum diatur.
+      </div>
+      {isLoading ? (
+        <div style={{ padding: '1rem 1.25rem', color: '#64748b', fontSize: '0.8125rem' }}>Memuat pemetaan akun...</div>
+      ) : mappings.length === 0 ? (
+        <div style={{ padding: '1rem 1.25rem', color: '#64748b', fontSize: '0.8125rem' }}>
+          Belum ada pemetaan. Jalankan migration 009_auto_journal.sql.
+        </div>
+      ) : (
+        <table className="data-table">
+          <tbody>
+            {mappings.map(m => {
+              const options = accounts.filter(a => a.account_type === m.expected_type)
+              return (
+                <tr key={m.key}>
+                  <td style={{ width: '40%' }}>
+                    <div style={{ fontWeight: 600, color: '#e2e8f0' }}>{m.label}</div>
+                    <div style={{ fontSize: '0.6875rem', color: accountTypeColors[m.expected_type] }}>{accountTypeLabels[m.expected_type]}</div>
+                  </td>
+                  <td>
+                    <select
+                      value={m.account_id ?? ''}
+                      disabled={updateMutation.isPending}
+                      onChange={(e) => updateMutation.mutate({ key: m.key, account_id: e.target.value || null })}
+                      className="input-base"
+                      style={{ background: '#0f172a', borderColor: m.account_id ? undefined : '#ef4444' }}
+                    >
+                      <option value="">-- Belum diatur --</option>
+                      {options.map(a => (
+                        <option key={a.id} value={a.id}>{a.code} - {a.name}{a.is_active ? '' : ' (nonaktif)'}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
 }
 
 export default function ChartOfAccountsPage() {
@@ -152,6 +242,7 @@ export default function ChartOfAccountsPage() {
         </div>
       ) : (
         <div className="page-modules">
+          <AutoJournalAccounts accounts={accounts} />
           {(Object.keys(accountTypeLabels) as AccountType[]).map((type) => {
             const list = grouped[type] || []
             return (

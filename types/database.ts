@@ -14,6 +14,7 @@ export type Json =
 // ============================================================
 
 export type PurchaseOrderStatus = 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled'
+export type PaymentTerm = 'credit' | 'cash'
 export type StockMovementType = 'purchase_in' | 'sale_out' | 'production_in' | 'production_out' | 'adjustment'
 export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired'
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'partial' | 'overdue' | 'cancelled'
@@ -67,6 +68,8 @@ export interface PurchaseOrder {
   status: PurchaseOrderStatus
   notes: string | null
   total_amount: number
+  payment_term: PaymentTerm
+  paid_at: string | null
   items?: PurchaseOrderItem[]
   created_at: string
   updated_at: string
@@ -271,6 +274,16 @@ export interface ChartOfAccount {
   is_active: boolean
   balance: number
   created_at: string
+  updated_at: string
+}
+
+// Akun yang dipakai jurnal otomatis (migration 009)
+export interface AccountMapping {
+  key: string
+  label: string
+  expected_type: AccountType
+  account_id: string | null
+  sort_order: number
   updated_at: string
 }
 

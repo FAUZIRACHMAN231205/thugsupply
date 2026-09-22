@@ -9,9 +9,10 @@ import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
-import { Plus, Eye, CheckCircle, XCircle, X, Loader2, Trash2, Download } from 'lucide-react'
+import { Plus, Eye, CheckCircle, XCircle, X, Loader2, Trash2, Download, Wallet } from 'lucide-react'
 import type { PurchaseOrder, PurchaseOrderItem, Material } from '@/types/database'
 import { exportToCSV } from '@/lib/export'
+import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 import { formatMaterialLabel } from '@/lib/inventory-size'
 
 export default function PurchaseOrdersPage() {
@@ -28,6 +29,7 @@ export default function PurchaseOrdersPage() {
       supplier_id: '',
       order_date: new Date().toISOString().split('T')[0],
       expected_date: '',
+      payment_term: 'credit',
       notes: '',
       items: []
     }
@@ -79,6 +81,7 @@ export default function PurchaseOrdersPage() {
       supplier_id: suppliers[0]?.id || '',
       order_date: new Date().toISOString().split('T')[0],
       expected_date: '',
+      payment_term: 'credit',
       notes: '',
       items: [{ material_id: materials[0]?.id || '', quantity: 1, unit_price: materials[0]?.cost_price || 0 }]
     })
@@ -115,6 +118,7 @@ export default function PurchaseOrdersPage() {
           supplier_id: formData.supplier_id,
           order_date: formData.order_date,
           expected_date: formData.expected_date || null,
+          payment_term: formData.payment_term,
           status: 'draft',
           notes: formData.notes || null,
           total_amount
@@ -129,8 +133,7 @@ export default function PurchaseOrdersPage() {
         material_id: item.material_id,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        received_quantity: 0,
-        subtotal: item.quantity * item.unit_price
+        received_quantity: 0
       }))
 
       const { error: itemsError } = await supabase
@@ -181,7 +184,7 @@ export default function PurchaseOrdersPage() {
       if (poError) throw poError
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase_orders_data'] })
+      invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
     },
     onError: (err) => {
@@ -195,6 +198,27 @@ export default function PurchaseOrdersPage() {
     if (!window.confirm(confirmMsg)) return
     
     statusMutation.mutate({ po, newStatus })
+  }
+
+  const payMutation = useMutation({
+    mutationFn: async (po: PurchaseOrder) => {
+      // Jurnal Hutang Usaha / Kas + tanda lunas diproses atomik di database (lihat migration 009)
+      const { error } = await supabase.rpc('pay_purchase_order', { p_po_id: po.id })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      invalidatePostingQueries(queryClient)
+      setIsDetailOpen(false)
+    },
+    onError: (err) => {
+      console.error('Error paying PO:', err)
+      alert(err?.message || 'Gagal mencatat pembayaran ke supplier')
+    }
+  })
+
+  const handlePaySupplier = (po: PurchaseOrder) => {
+    if (!window.confirm(`Catat pelunasan PO ${po.po_number} sebesar ${formatCurrency(po.total_amount)} ke supplier?`)) return
+    payMutation.mutate(po)
   }
 
   const totalPending = purchaseOrders.filter(po => ['sent', 'confirmed'].includes(po.status))
@@ -317,7 +341,7 @@ export default function PurchaseOrdersPage() {
 
             {/* Body — scrollable */}
             <form onSubmit={handleSubmit(onSubmit)} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem',  }}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="form-label">Pilih Supplier *</label>
                   <select {...register('supplier_id')} className="input-base" style={{ background: '#0f172a' }}>
@@ -330,6 +354,14 @@ export default function PurchaseOrdersPage() {
                   <label className="form-label">Tanggal Estimasi Terima</label>
                   <input type="date" {...register('expected_date')} className="input-base" />
                   <FormError message={errors.expected_date?.message} />
+                </div>
+                <div>
+                  <label className="form-label">Pembayaran *</label>
+                  <select {...register('payment_term')} className="input-base" style={{ background: '#0f172a' }}>
+                    <option value="credit">Tempo (Hutang)</option>
+                    <option value="cash">Tunai saat diterima</option>
+                  </select>
+                  <FormError message={errors.payment_term?.message} />
                 </div>
               </div>
 
@@ -449,7 +481,7 @@ export default function PurchaseOrdersPage() {
             
             {/* Body — scrollable */}
             <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem',  }}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4" style={{ background: '#050811', padding: '1rem', borderRadius: '0.5rem'}}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ background: '#050811', padding: '1rem', borderRadius: '0.5rem'}}>
                 <div>
                   <div style={{ fontSize: '0.6875rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Supplier</div>
                   <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0', marginTop: '0.25rem' }}>{selectedPO.supplier?.name}</div>
@@ -459,6 +491,17 @@ export default function PurchaseOrdersPage() {
                   <div style={{ fontSize: '0.6875rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status Saat Ini</div>
                   <div style={{ marginTop: '0.25rem' }}>
                     <StatusBadge status={selectedPO.status} />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.6875rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pembayaran</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0', marginTop: '0.25rem' }}>
+                    {selectedPO.payment_term === 'cash' ? 'Tunai' : 'Tempo (Hutang)'}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: selectedPO.paid_at ? '#22c55e' : '#64748b' }}>
+                    {selectedPO.paid_at
+                      ? `Lunas ${formatDate(selectedPO.paid_at)}`
+                      : selectedPO.status === 'received' ? 'Belum lunas' : 'Dibayar saat/setelah barang diterima'}
                   </div>
                 </div>
               </div>
@@ -516,6 +559,11 @@ export default function PurchaseOrdersPage() {
                 {['sent', 'confirmed'].includes(selectedPO.status) && (
                   <button onClick={() => handleUpdateStatus(selectedPO, 'received')} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', background: '#22c55e', color: '#020617' }}>
                     <CheckCircle size={14} /> Terima Barang (Received)
+                  </button>
+                )}
+                {selectedPO.status === 'received' && selectedPO.payment_term === 'credit' && !selectedPO.paid_at && (
+                  <button onClick={() => handlePaySupplier(selectedPO)} disabled={payMutation.isPending} className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    {payMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />} Bayar ke Supplier
                   </button>
                 )}
                 {!['received', 'cancelled'].includes(selectedPO.status) && (
