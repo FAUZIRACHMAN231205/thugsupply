@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase/supabase'
+import { fetchAccountBalances, fetchMonthlyProfitSummary, formatMonthLabel } from '@/lib/reports'
 import { formatCurrency } from '@/lib/utils'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, TrendingDown, Loader2 } from 'lucide-react'
@@ -33,51 +33,27 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   return null
 }
 
-const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-
 export default function ProfitLossPage() {
   const { data, isLoading: loading } = useQuery({
     queryKey: ['profit_loss_data'],
     queryFn: async () => {
-      // 1. Fetch COA accounts
-      const accountsRes = await supabase.from('chart_of_accounts').select('*')
-      if (accountsRes.error) throw accountsRes.error
-      const accounts = accountsRes.data || []
+      // Saldo akun & ringkasan bulanan dihitung di database (lihat migration 010)
+      const [accounts, monthly] = await Promise.all([
+        fetchAccountBalances(),
+        fetchMonthlyProfitSummary(6),
+      ])
 
-      // 2. Fetch Journal Lines joining Journal Entries to get dates
-      const linesRes = await supabase
-        .from('journal_lines')
-        .select('*, entry:journal_entries(entry_date)')
-      if (linesRes.error) throw linesRes.error
-      const lines = linesRes.data || []
-
-      // 3. Compute balances dynamically
-      const accountBalances: Record<string, number> = {}
-      accounts.forEach(acc => {
-        const accLines = lines.filter(l => l.account_id === acc.id)
-        const debit = accLines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
-        const credit = accLines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
-
-        if (['asset', 'expense'].includes(acc.account_type)) {
-          accountBalances[acc.id] = debit - credit
-        } else {
-          accountBalances[acc.id] = credit - debit
-        }
-      })
-
-      // 4. Construct P&L sections
       const revenueItems: PLItem[] = []
       const cogsItems: PLItem[] = []
       const expenseItems: PLItem[] = []
 
       accounts.forEach(acc => {
-        const amount = accountBalances[acc.id] || 0
         if (acc.account_type === 'revenue') {
-          revenueItems.push({ label: acc.name, amount })
+          revenueItems.push({ label: acc.name, amount: acc.balance })
         } else if (acc.account_type === 'expense' && acc.code.startsWith('5')) {
-          cogsItems.push({ label: acc.name, amount })
+          cogsItems.push({ label: acc.name, amount: acc.balance })
         } else if (acc.account_type === 'expense' && acc.code.startsWith('6')) {
-          expenseItems.push({ label: acc.name, amount })
+          expenseItems.push({ label: acc.name, amount: acc.balance })
         }
       })
 
@@ -91,53 +67,16 @@ export default function ProfitLossPage() {
         { category: 'Biaya Operasional', items: expenseItems, total: totalExpense, type: 'expense' }
       ]
 
-      // 5. Generate dynamic monthly chart data
-      // Group by Month/Year of journal entries
-      const monthlyGroups: Record<string, { revenue: number; cogs: number }> = {}
-
-      // Seed current year months
-      for (let i = 0; i < 6; i++) { // show last 6 months
-        const date = new Date()
-        date.setMonth(date.getMonth() - i)
-        const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-        monthlyGroups[monthKey] = { revenue: 0, cogs: 0 }
-      }
-
-      lines.forEach((line: { debit: number; credit: number; account_id: string; entry?: { entry_date: string } }) => {
-        if (!line.entry?.entry_date) return
-        const date = new Date(line.entry.entry_date)
-        const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-        
-        // If not in our seed range, ignore
-        if (monthlyGroups[monthKey] === undefined) return
-
-        const acc = accounts.find(a => a.id === line.account_id)
-        if (!acc) return
-
-        const debit = Number(line.debit) || 0
-        const credit = Number(line.credit) || 0
-
-        if (acc.account_type === 'revenue') {
-          monthlyGroups[monthKey].revenue += (credit - debit)
-        } else if (acc.account_type === 'expense' && acc.code.startsWith('5')) {
-          monthlyGroups[monthKey].cogs += (debit - credit)
-        }
-      })
-
-      const rawChart = Object.entries(monthlyGroups).map(([key, vals]) => {
-        const [year, month] = key.split('-')
-        const monthIndex = parseInt(month, 10) - 1
-        return {
-          key,
-          month: `${monthNames[monthIndex]} ${year.slice(-2)}`,
-          'Pendapatan': vals.revenue,
-          'Laba Kotor': vals.revenue - vals.cogs
-        }
-      }).reverse()
+      const chartData = monthly.map(m => ({
+        key: m.month,
+        month: formatMonthLabel(m.month),
+        'Pendapatan': m.revenue,
+        'Laba Kotor': m.revenue - m.cogs
+      }))
 
       return {
         plData: sections,
-        chartData: rawChart
+        chartData
       }
     }
   })

@@ -9,7 +9,8 @@ import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, BookOpen, X, Loader2, Link2 } from 'lucide-react'
-import type { ChartOfAccount, AccountType, AccountMapping } from '@/types/database'
+import type { AccountBalance, AccountType, AccountMapping } from '@/types/database'
+import { fetchAccountBalances } from '@/lib/reports'
 
 const accountTypeLabels: Record<AccountType, string> = {
   asset: 'Aktiva',
@@ -28,7 +29,7 @@ const accountTypeColors: Record<AccountType, string> = {
 }
 
 // Akun yang dipakai jurnal otomatis (terima PO, bayar supplier, selesai WO, invoice lunas)
-function AutoJournalAccounts({ accounts }: { accounts: ChartOfAccount[] }) {
+function AutoJournalAccounts({ accounts }: { accounts: AccountBalance[] }) {
   const queryClient = useQueryClient()
 
   const { data: mappings = [], isLoading } = useQuery({
@@ -139,40 +140,7 @@ export default function ChartOfAccountsPage() {
 
   const { data: accounts = [], isLoading: loading } = useQuery({
     queryKey: ['chart_of_accounts_data'],
-    queryFn: async () => {
-      const accountsRes = await supabase
-        .from('chart_of_accounts')
-        .select('*')
-        .order('code', { ascending: true })
-
-      if (accountsRes.error) throw accountsRes.error
-      const accountsData = accountsRes.data || []
-
-      const linesRes = await supabase
-        .from('journal_lines')
-        .select('account_id, debit, credit')
-
-      if (linesRes.error) throw linesRes.error
-      const linesData = linesRes.data || []
-
-      return accountsData.map(acc => {
-        const accLines = linesData.filter(l => l.account_id === acc.id)
-        const totalDebit = accLines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
-        const totalCredit = accLines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
-
-        let balance = 0
-        if (['asset', 'expense'].includes(acc.account_type)) {
-          balance = totalDebit - totalCredit
-        } else {
-          balance = totalCredit - totalDebit
-        }
-
-        return {
-          ...acc,
-          balance
-        }
-      })
-    }
+    queryFn: () => fetchAccountBalances()
   })
 
   // Open modal
@@ -225,7 +193,7 @@ export default function ChartOfAccountsPage() {
     if (!acc[coa.account_type]) acc[coa.account_type] = []
     acc[coa.account_type].push(coa)
     return acc
-  }, {} as Record<AccountType, ChartOfAccount[]>)
+  }, {} as Record<AccountType, AccountBalance[]>)
 
   return (
     <div className="page-modules">
@@ -276,7 +244,7 @@ export default function ChartOfAccountsPage() {
                         <td colSpan={5} style={{ textAlign: 'center', padding: '1rem', color: '#64748b' }}>Belum ada data untuk kategori ini.</td>
                       </tr>
                     ) : (
-                      list.map((account: import('@/types/database').ChartOfAccount & { balance: number }) => (
+                      list.map((account) => (
                         <tr key={account.id}>
                           <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: accountTypeColors[type] }}>{account.code}</span></td>
                           <td style={{ fontWeight: account.parent_id ? 400 : 600, paddingLeft: account.parent_id ? '2rem' : undefined }}>

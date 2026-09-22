@@ -4,6 +4,8 @@ import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatMonthLabel } from '@/lib/reports'
+import type { MonthlyProfitSummary } from '@/types/database'
 import StatusBadge from '@/components/ui/StatusBadge'
 import PageSkeleton from '@/components/ui/PageSkeleton'
 import {
@@ -99,7 +101,7 @@ export default function DashboardPage() {
           quoRes,
           custRes,
           suppRes,
-          linesRes,
+          monthlyRes,
         ] = await Promise.all([
           supabase.from('invoices').select('total_amount, issue_date').gte('issue_date', startOfMonthStr),
           supabase.from('purchase_orders').select('total_amount').gte('order_date', startOfMonthStr).eq('status', 'received'),
@@ -109,11 +111,12 @@ export default function DashboardPage() {
           supabase.from('quotations').select('*', { count: 'exact', head: true }).in('status', ['draft', 'sent']),
           supabase.from('customers').select('*', { count: 'exact', head: true }).eq('is_active', true),
           supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('is_active', true),
-          supabase.from('journal_lines').select('debit, credit, account_id, entry:journal_entries(entry_date, entry_type)'),
+          // Ringkasan bulanan dihitung di database (lihat migration 010)
+          supabase.rpc('monthly_profit_summary', { p_months: 5 }),
         ]);
 
         // Cek error dari semua query
-        const errors = [invoicesRes, poRes, woRes, matRes, pendingInvRes, quoRes, custRes, suppRes, linesRes]
+        const errors = [invoicesRes, poRes, woRes, matRes, pendingInvRes, quoRes, custRes, suppRes, monthlyRes]
           .filter(r => r.error)
           .map(r => r.error!.message)
         
@@ -138,68 +141,25 @@ export default function DashboardPage() {
         m => (m.current_stock || 0) <= (m.reorder_point || 0)
       )
 
-      // Build chart data dari journal lines
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
-      const monthlyGroups: Record<string, { revenue: number; cogs: number }> = {}
+      // Grafik 5 bulan terakhir dari jurnal
+      const monthly = ((monthlyRes.data || []) as MonthlyProfitSummary[]).map(m => ({
+        month: m.month,
+        revenue: Number(m.revenue) || 0,
+        cogs: Number(m.cogs) || 0,
+      }))
 
-      // Seed 5 bulan terakhir
-      for (let i = 4; i >= 0; i--) {
-        const date = new Date()
-        date.setMonth(date.getMonth() - i)
-        const key = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-        monthlyGroups[key] = { revenue: 0, cogs: 0 }
+      // Jika belum ada jurnal sama sekali (Supabase baru), pakai total invoice
+      // bulan ini sebagai proxy pendapatan
+      const hasJournal = monthly.some(m => m.revenue !== 0 || m.cogs !== 0)
+      if (!hasJournal && monthly.length > 0) {
+        monthly[monthly.length - 1].revenue = monthlyRevenue
       }
 
-      // Jika journal lines kosong (Supabase baru, belum ada data),
-      // gunakan data dari invoices untuk grafik revenue saja
-      const lines = linesRes.data || []
-      if (lines.length === 0) {
-        // Fallback: group invoices per bulan sebagai proxy revenue
-        const invoiceAll = invoicesRes.data || []
-        invoiceAll.forEach((inv) => {
-          if (!inv.issue_date) return
-          const date = new Date(inv.issue_date)
-          const key = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-          if (monthlyGroups[key] !== undefined) {
-            monthlyGroups[key].revenue += Number(inv.total_amount) || 0
-          }
-        })
-      } else {
-        // Fetch COA untuk mapping account_type
-        const coaRes = await supabase.from('chart_of_accounts').select('id, code, account_type')
-        const accounts = coaRes.data || []
-
-        lines.forEach((line) => {
-          const entryObj = Array.isArray(line.entry) ? line.entry[0] : line.entry;
-          const entryDate = entryObj?.entry_date
-          if (!entryDate) return
-          const date = new Date(entryDate)
-          const key = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
-          if (monthlyGroups[key] === undefined) return
-
-          const acc = accounts.find((a) => a.id === line.account_id)
-          if (!acc) return
-
-          const debit = Number(line.debit) || 0
-          const credit = Number(line.credit) || 0
-
-          if (acc.account_type === 'revenue') {
-            monthlyGroups[key].revenue += (credit - debit)
-          } else if (acc.account_type === 'expense' && acc.code.startsWith('5')) {
-            monthlyGroups[key].cogs += (debit - credit)
-          }
-        })
-      }
-
-      const rawChart = Object.entries(monthlyGroups).map(([key, vals]) => {
-        const [year, month] = key.split('-')
-        const monthIndex = parseInt(month, 10) - 1
-        return {
-          month: `${monthNames[monthIndex]} ${year.slice(-2)}`,
-          pendapatan: vals.revenue,
-          hppb: vals.cogs,
-        }
-      })
+      const rawChart = monthly.map(m => ({
+        month: formatMonthLabel(m.month),
+        pendapatan: m.revenue,
+        hppb: m.cogs,
+      }))
 
       return {
         stats: {

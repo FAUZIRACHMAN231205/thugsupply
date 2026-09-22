@@ -277,6 +277,28 @@ export interface ChartOfAccount {
   updated_at: string
 }
 
+// Hasil RPC account_balances (migration 010)
+export interface AccountBalance {
+  id: string
+  code: string
+  name: string
+  account_type: AccountType
+  parent_id: string | null
+  description: string | null
+  is_active: boolean
+  total_debit: number
+  total_credit: number
+  balance: number
+}
+
+// Hasil RPC monthly_profit_summary (migration 010); month = tanggal 1 tiap bulan (YYYY-MM-DD)
+export interface MonthlyProfitSummary {
+  month: string
+  revenue: number
+  cogs: number
+  expense: number
+}
+
 // Akun yang dipakai jurnal otomatis (migration 009)
 export interface AccountMapping {
   key: string

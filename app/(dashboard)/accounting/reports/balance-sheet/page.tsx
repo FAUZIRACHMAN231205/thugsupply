@@ -2,7 +2,7 @@
 
 
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase/supabase'
+import { fetchAccountBalances } from '@/lib/reports'
 import { formatCurrency } from '@/lib/utils'
 import { Loader2, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react'
 
@@ -11,43 +11,8 @@ export default function BalanceSheetPage() {
 
   const { data: accounts = [], isLoading: loading, error, refetch } = useQuery({
     queryKey: ['balance_sheet_data'],
-    queryFn: async () => {
-      // 1. Fetch COA accounts
-      const accountsRes = await supabase
-        .from('chart_of_accounts')
-        .select('*')
-        .order('code', { ascending: true })
-      if (accountsRes.error) throw accountsRes.error
-      const accountsData = accountsRes.data || []
-
-      // 2. Fetch Journal Lines to calculate balances dynamically
-      const linesRes = await supabase
-        .from('journal_lines')
-        .select('account_id, debit, credit')
-      if (linesRes.error) throw linesRes.error
-      const linesData = linesRes.data || []
-
-      // 3. Compute balances dynamically
-      const computed = accountsData.map(acc => {
-        const accLines = linesData.filter(l => l.account_id === acc.id)
-        const totalDebit = accLines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
-        const totalCredit = accLines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
-
-        let balance = 0
-        if (['asset', 'expense'].includes(acc.account_type)) {
-          balance = totalDebit - totalCredit
-        } else {
-          balance = totalCredit - totalDebit
-        }
-
-        return {
-          ...acc,
-          balance
-        }
-      })
-
-      return computed
-    }
+    // Saldo dihitung di database (lihat migration 010)
+    queryFn: () => fetchAccountBalances()
   })
 
   if (loading) {
