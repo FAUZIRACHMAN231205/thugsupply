@@ -67,6 +67,14 @@ npm run dev
 
 Buka [http://localhost:3000](http://localhost:3000) di browser.
 
+### 4. Tes Migration Database
+
+```bash
+npm run test:db
+```
+
+Menjalankan seluruh migration di `supabase/migrations/` pada Postgres sementara di dalam Node (PGlite), lalu menguji RLS admin, transaksi stok, penomoran dokumen, jurnal otomatis, dan fungsi laporan. **Tidak menyentuh database Supabase Anda** dan tidak butuh koneksi internet. Jalankan setiap kali menambah atau mengubah migration.
+
 ## 📁 Struktur Folder
 
 ```
