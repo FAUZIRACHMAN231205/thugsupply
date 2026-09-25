@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { productSchema, type ProductFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, generateCode } from '@/lib/utils'
 import { openFormModal } from '@/lib/open-form-modal'
 import { Plus, Edit2, Trash2, X, Loader2, Download } from 'lucide-react'
@@ -20,6 +22,8 @@ import {
 } from '@/lib/inventory-size'
 
 export default function ProductsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   
   // Modal states
@@ -149,7 +153,7 @@ export default function ProductsPage() {
     },
     onError: (err) => {
       console.error('Error saving product:', err)
-      alert('Gagal menyimpan data produk')
+      toast.error('Gagal menyimpan data produk')
     }
   })
 
@@ -170,12 +174,18 @@ export default function ProductsPage() {
     },
     onError: (err) => {
       console.error('Error deleting product:', err)
-      alert('Gagal menghapus produk. Kemungkinan sudah digunakan dalam transaksi.')
+      toast.error('Gagal menghapus produk. Kemungkinan sudah digunakan dalam transaksi.')
     }
   })
 
-  const handleDelete = (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus produk ini?')) return
+  const handleDelete = async (id: string) => {
+    const ok = await confirm({
+      title: 'Hapus Produk',
+      message: 'Apakah Anda yakin ingin menghapus produk ini?',
+      confirmLabel: 'Hapus',
+      danger: true,
+    })
+    if (!ok) return
     deleteMutation.mutate(id)
   }
 

@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { workOrderSchema, type WorkOrderFormValues } from '@/lib/validations/manufacturing'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, Clock, AlertCircle, CheckCircle2, X, Loader2, Download } from 'lucide-react'
@@ -66,6 +68,8 @@ function StageProgress({ status }: { status: string }) {
 }
 
 export default function WorkOrdersPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   // const [loadingAction, setLoadingAction] = useState(false)
 
@@ -172,7 +176,7 @@ export default function WorkOrdersPage() {
     },
     onError: (err) => {
       console.error('Error creating WO:', err)
-      alert('Gagal membuat Work Order')
+      toast.error('Gagal membuat Work Order')
     }
   })
 
@@ -196,7 +200,7 @@ export default function WorkOrdersPage() {
       setIsDetailOpen(true)
     } catch (err) {
       console.error('Error fetching WO details:', err)
-      alert('Gagal memuat detail Work Order')
+      toast.error('Gagal memuat detail Work Order')
     } finally {
       // setLoadingAction(false)
     }
@@ -222,18 +226,28 @@ export default function WorkOrdersPage() {
 
       if (woError) throw woError
     },
-    onSuccess: () => {
+    onSuccess: (_data, { newStatus }) => {
       invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
+      toast.success(newStatus === 'completed'
+        ? 'Work Order selesai, stok dan jurnal sudah diperbarui.'
+        : `Status Work Order diubah ke ${newStatus}.`)
     },
     onError: (err: Error) => {
-      alert(err?.message || 'Gagal memproses perubahan status Work Order')
+      toast.error(err?.message || 'Gagal memproses perubahan status Work Order')
     }
   })
 
-  const handleUpdateStatus = (wo: WorkOrderWithDetails, newStatus: 'in_progress' | 'completed' | 'cancelled') => {
-    const confirmMsg = `Ubah status Work Order ke ${newStatus}?`
-    if (!window.confirm(confirmMsg)) return
+  const handleUpdateStatus = async (wo: WorkOrderWithDetails, newStatus: 'in_progress' | 'completed' | 'cancelled') => {
+    const ok = await confirm({
+      title: newStatus === 'completed' ? 'Selesaikan Work Order' : 'Ubah Status Work Order',
+      message: newStatus === 'completed'
+        ? `Selesaikan WO ${wo.wo_number}? Bahan baku akan dipotong dan produk jadi ditambahkan ke stok.`
+        : `Ubah status Work Order ${wo.wo_number} ke ${newStatus}?`,
+      confirmLabel: newStatus === 'completed' ? 'Selesaikan' : 'Ubah Status',
+      danger: newStatus === 'cancelled',
+    })
+    if (!ok) return
     statusMutation.mutate({ wo, newStatus })
   }
 

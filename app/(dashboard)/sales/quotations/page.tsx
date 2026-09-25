@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { quotationSchema, type QuotationFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, X, Loader2, Trash2, Printer } from 'lucide-react'
@@ -14,6 +16,8 @@ import type { Quotation, QuotationItem } from '@/types/database'
 import { formatProductLabel } from '@/lib/inventory-size'
 
 export default function QuotationsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
 
   // Modals state
@@ -162,7 +166,7 @@ export default function QuotationsPage() {
     },
     onError: (err) => {
       console.error('Error saving quotation:', err)
-      alert('Gagal membuat Penawaran Harga')
+      toast.error('Gagal membuat Penawaran Harga')
     }
   })
 
@@ -196,12 +200,18 @@ export default function QuotationsPage() {
     },
     onError: (err) => {
       console.error('Error updating status:', err)
-      alert('Gagal memperbarui status penawaran')
+      toast.error('Gagal memperbarui status penawaran')
     }
   })
 
-  const handleUpdateStatus = (quo: Quotation, newStatus: 'sent' | 'accepted' | 'rejected' | 'expired') => {
-    if (!window.confirm(`Ubah status penawaran ke ${newStatus}?`)) return
+  const handleUpdateStatus = async (quo: Quotation, newStatus: 'sent' | 'accepted' | 'rejected' | 'expired') => {
+    const ok = await confirm({
+      title: 'Ubah Status Penawaran',
+      message: `Ubah status penawaran ${quo.quotation_number} ke ${newStatus}?`,
+      confirmLabel: 'Ubah Status',
+      danger: newStatus === 'rejected',
+    })
+    if (!ok) return
     statusMutation.mutate({ quo, newStatus })
   }
 

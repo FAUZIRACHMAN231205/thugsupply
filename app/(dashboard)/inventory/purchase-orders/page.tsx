@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { purchaseOrderSchema, type PurchaseOrderFormValues } from '@/lib/validations/inventory'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, CheckCircle, XCircle, X, Loader2, Trash2, Download, Wallet } from 'lucide-react'
@@ -16,6 +18,8 @@ import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 import { formatMaterialLabel } from '@/lib/inventory-size'
 
 export default function PurchaseOrdersPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
 
   // Modals state
@@ -148,7 +152,7 @@ export default function PurchaseOrdersPage() {
     },
     onError: (err) => {
       console.error('Error saving PO:', err)
-      alert('Gagal membuat Purchase Order')
+      toast.error('Gagal membuat Purchase Order')
     }
   })
 
@@ -183,19 +187,29 @@ export default function PurchaseOrdersPage() {
 
       if (poError) throw poError
     },
-    onSuccess: () => {
+    onSuccess: (_data, { newStatus }) => {
       invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
+      toast.success(newStatus === 'received'
+        ? 'Barang diterima, stok dan jurnal sudah diperbarui.'
+        : `Status Purchase Order diubah ke ${newStatus}.`)
     },
     onError: (err) => {
       console.error('Error updating PO status:', err)
-      alert(err?.message || 'Gagal memperbarui status Purchase Order')
+      toast.error(err?.message || 'Gagal memperbarui status Purchase Order')
     }
   })
 
-  const handleUpdateStatus = (po: PurchaseOrder, newStatus: 'sent' | 'confirmed' | 'received' | 'cancelled') => {
-    const confirmMsg = `Apakah Anda yakin ingin mengubah status PO ke ${newStatus}?`
-    if (!window.confirm(confirmMsg)) return
+  const handleUpdateStatus = async (po: PurchaseOrder, newStatus: 'sent' | 'confirmed' | 'received' | 'cancelled') => {
+    const ok = await confirm({
+      title: newStatus === 'received' ? 'Terima Barang' : 'Ubah Status PO',
+      message: newStatus === 'received'
+        ? `Tandai PO ${po.po_number} sebagai diterima? Stok bahan baku akan bertambah dan jurnal penerimaan dibuat otomatis.`
+        : `Ubah status PO ${po.po_number} ke ${newStatus}?`,
+      confirmLabel: newStatus === 'received' ? 'Terima Barang' : 'Ubah Status',
+      danger: newStatus === 'cancelled',
+    })
+    if (!ok) return
     
     statusMutation.mutate({ po, newStatus })
   }
@@ -209,15 +223,21 @@ export default function PurchaseOrdersPage() {
     onSuccess: () => {
       invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
+      toast.success('Pelunasan ke supplier tercatat.')
     },
     onError: (err) => {
       console.error('Error paying PO:', err)
-      alert(err?.message || 'Gagal mencatat pembayaran ke supplier')
+      toast.error(err?.message || 'Gagal mencatat pembayaran ke supplier')
     }
   })
 
-  const handlePaySupplier = (po: PurchaseOrder) => {
-    if (!window.confirm(`Catat pelunasan PO ${po.po_number} sebesar ${formatCurrency(po.total_amount)} ke supplier?`)) return
+  const handlePaySupplier = async (po: PurchaseOrder) => {
+    const ok = await confirm({
+      title: 'Bayar ke Supplier',
+      message: `Catat pelunasan PO ${po.po_number} sebesar ${formatCurrency(po.total_amount)} ke supplier?`,
+      confirmLabel: 'Catat Pelunasan',
+    })
+    if (!ok) return
     payMutation.mutate(po)
   }
 

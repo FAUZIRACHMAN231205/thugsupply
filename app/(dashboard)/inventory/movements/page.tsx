@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { stockMovementSchema, type StockMovementFormValues } from '@/lib/validations/inventory'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
 import { formatDatetime, formatNumber } from '@/lib/utils'
 import { TrendingUp, TrendingDown, Plus, X, Loader2, Download } from 'lucide-react'
 
@@ -23,6 +24,7 @@ const movementLabels: Record<string, string> = {
 }
 
 export default function MovementsPage() {
+  const toast = useToast()
   const queryClient = useQueryClient()
   const [isOpen, setIsOpen] = useState(false)
   
@@ -119,7 +121,7 @@ export default function MovementsPage() {
     },
     onError: (err) => {
       console.error('Error creating adjustment:', err)
-      alert(err?.message || 'Gagal membuat penyesuaian stok')
+      toast.error(err?.message || 'Gagal membuat penyesuaian stok')
     }
   })
 

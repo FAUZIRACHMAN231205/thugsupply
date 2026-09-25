@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { invoiceSchema, type InvoiceFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import StatusBadge from '@/components/ui/StatusBadge'
 import { Plus, Eye, DollarSign, XCircle, X, Loader2, Trash2, Printer } from 'lucide-react'
@@ -15,6 +17,8 @@ import { formatProductLabel } from '@/lib/inventory-size'
 import { invalidatePostingQueries } from '@/lib/invalidate-posting'
 
 export default function InvoicesPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
 
   // Modals state
@@ -174,7 +178,7 @@ export default function InvoicesPage() {
     },
     onError: (err) => {
       console.error('Error saving invoice:', err)
-      alert('Gagal membuat Invoice')
+      toast.error('Gagal membuat Invoice')
     }
   })
 
@@ -199,15 +203,21 @@ export default function InvoicesPage() {
     onSuccess: () => {
       invalidatePostingQueries(queryClient)
       setIsDetailOpen(false)
+      toast.success('Invoice lunas, stok dan jurnal sudah diperbarui.')
     },
     onError: (err) => {
       console.error('Error processing payment:', err)
-      alert(err?.message || 'Gagal memproses pembayaran invoice')
+      toast.error(err?.message || 'Gagal memproses pembayaran invoice')
     }
   })
 
-  const handleProcessPayment = (inv: Invoice) => {
-    if (!window.confirm('Proses pembayaran lunas untuk Invoice ini?')) return
+  const handleProcessPayment = async (inv: Invoice) => {
+    const ok = await confirm({
+      title: 'Proses Pembayaran',
+      message: `Tandai Invoice ${inv.invoice_number} sebagai lunas? Stok akan dipotong (ready stock) atau Work Order dibuat (pre-order), dan jurnal penjualan dibuat otomatis.`,
+      confirmLabel: 'Proses Lunas',
+    })
+    if (!ok) return
     paymentMutation.mutate(inv)
   }
 
@@ -229,12 +239,18 @@ export default function InvoicesPage() {
     },
     onError: (err) => {
       console.error('Error cancelling invoice:', err)
-      alert('Gagal membatalkan invoice')
+      toast.error('Gagal membatalkan invoice')
     }
   })
 
-  const handleCancelInvoice = (inv: Invoice) => {
-    if (!window.confirm('Apakah Anda yakin ingin membatalkan Invoice ini?')) return
+  const handleCancelInvoice = async (inv: Invoice) => {
+    const ok = await confirm({
+      title: 'Batalkan Invoice',
+      message: `Apakah Anda yakin ingin membatalkan Invoice ${inv.invoice_number}?`,
+      confirmLabel: 'Batalkan Invoice',
+      danger: true,
+    })
+    if (!ok) return
     cancelMutation.mutate(inv)
   }
 

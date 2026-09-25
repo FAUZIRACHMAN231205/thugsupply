@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { materialSchema, type MaterialFormValues } from '@/lib/validations/inventory'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, generateCode } from '@/lib/utils'
 import { openFormModal } from '@/lib/open-form-modal'
 import { Plus, Edit2, Trash2, X, Loader2, Download } from 'lucide-react'
@@ -21,6 +23,8 @@ import {
 } from '@/lib/inventory-size'
 
 export default function MaterialsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   
   // Modal states
@@ -157,10 +161,10 @@ export default function MaterialsPage() {
     onError: (err: Error) => {
       const msg = err?.message || ''
       if (msg.includes('idx_materials_name_size_unique') || msg.includes('duplicate')) {
-        alert('Material dengan nama dan ukuran yang sama sudah terdaftar.')
+        toast.error('Material dengan nama dan ukuran yang sama sudah terdaftar.')
         return
       }
-      alert('Gagal menyimpan data bahan baku: ' + msg)
+      toast.error('Gagal menyimpan data bahan baku: ' + msg)
     }
   })
 
@@ -181,12 +185,18 @@ export default function MaterialsPage() {
     },
     onError: (err) => {
       console.error('Error deleting material:', err)
-      alert('Gagal menghapus bahan baku. Kemungkinan sudah digunakan dalam transaksi.')
+      toast.error('Gagal menghapus bahan baku. Kemungkinan sudah digunakan dalam transaksi.')
     }
   })
 
-  const handleDelete = (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus bahan baku ini?')) return
+  const handleDelete = async (id: string) => {
+    const ok = await confirm({
+      title: 'Hapus Bahan Baku',
+      message: 'Apakah Anda yakin ingin menghapus bahan baku ini?',
+      confirmLabel: 'Hapus',
+      danger: true,
+    })
+    if (!ok) return
     deleteMutation.mutate(id)
   }
 

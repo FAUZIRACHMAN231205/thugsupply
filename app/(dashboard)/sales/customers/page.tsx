@@ -7,12 +7,16 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { customerSchema, type CustomerFormValues } from '@/lib/validations/sales'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { formatCurrency, generateCode } from '@/lib/utils'
 import { openFormModal } from '@/lib/open-form-modal'
 import { Plus, Edit2, Trash2, X, Loader2 } from 'lucide-react'
 import type { Customer } from '@/types/database'
 
 export default function CustomersPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   
   // Modal states
@@ -115,7 +119,7 @@ export default function CustomersPage() {
     },
     onError: (err) => {
       console.error('Error saving customer:', err)
-      alert('Gagal menyimpan data customer')
+      toast.error('Gagal menyimpan data customer')
     }
   })
 
@@ -136,12 +140,18 @@ export default function CustomersPage() {
     },
     onError: (err) => {
       console.error('Error deleting customer:', err)
-      alert('Gagal menghapus customer. Kemungkinan sudah digunakan dalam transaksi.')
+      toast.error('Gagal menghapus customer. Kemungkinan sudah digunakan dalam transaksi.')
     }
   })
 
-  const handleDelete = (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus customer ini?')) return
+  const handleDelete = async (id: string) => {
+    const ok = await confirm({
+      title: 'Hapus Customer',
+      message: 'Apakah Anda yakin ingin menghapus customer ini?',
+      confirmLabel: 'Hapus',
+      danger: true,
+    })
+    if (!ok) return
     deleteMutation.mutate(id)
   }
 

@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { journalEntrySchema, type JournalEntryFormValues } from '@/lib/validations/accounting'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, X, Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Download } from 'lucide-react'
 
@@ -61,6 +62,7 @@ const accountTypeLabels: Record<string, string> = {
 }
 
 export default function JournalPage() {
+  const toast = useToast()
   const queryClient = useQueryClient()
 
   // Expand state
@@ -209,15 +211,19 @@ export default function JournalPage() {
     },
     onError: (err) => {
       console.error('Error saving journal entry:', err)
-      alert(err?.message || 'Gagal menyimpan jurnal akuntansi')
+      toast.error(err?.message || 'Gagal menyimpan jurnal akuntansi')
     }
   })
 
   const onSubmit = (data: JournalEntryFormValues) => {
     const { totalDebit, totalCredit } = calculateSums()
-    if (totalDebit === 0) return alert('Total nilai transaksi tidak boleh nol')
+    if (totalDebit === 0) {
+      toast.error('Total nilai transaksi tidak boleh nol')
+      return
+    }
     if (totalDebit !== totalCredit) {
-      return alert(`Jurnal tidak seimbang! Total Debit (${formatCurrency(totalDebit)}) harus sama dengan Total Kredit (${formatCurrency(totalCredit)})`)
+      toast.error(`Total Debit (${formatCurrency(totalDebit)}) harus sama dengan Total Kredit (${formatCurrency(totalCredit)})`, 'Jurnal tidak seimbang')
+      return
     }
     submitMutation.mutate(data)
   }
@@ -241,7 +247,7 @@ export default function JournalPage() {
       exportJournals(allJournals)
     } catch (err) {
       console.error('Error exporting journals:', err)
-      alert('Gagal mengekspor jurnal')
+      toast.error('Gagal mengekspor jurnal')
     } finally {
       setExporting(false)
     }

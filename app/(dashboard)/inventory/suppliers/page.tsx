@@ -7,12 +7,16 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { supplierSchema, type SupplierFormValues } from '@/lib/validations/inventory'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { generateCode } from '@/lib/utils'
 import { openFormModal } from '@/lib/open-form-modal'
 import { Plus, Edit2, Trash2, X, Loader2 } from 'lucide-react'
 import type { Supplier } from '@/types/database'
 
 export default function SuppliersPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   
   // Modal states
@@ -114,7 +118,7 @@ export default function SuppliersPage() {
     },
     onError: (err) => {
       console.error('Error saving supplier:', err)
-      alert('Gagal menyimpan data supplier')
+      toast.error('Gagal menyimpan data supplier')
     }
   })
 
@@ -135,12 +139,18 @@ export default function SuppliersPage() {
     },
     onError: (err) => {
       console.error('Error deleting supplier:', err)
-      alert('Gagal menghapus supplier. Kemungkinan sudah digunakan dalam transaksi.')
+      toast.error('Gagal menghapus supplier. Kemungkinan sudah digunakan dalam transaksi.')
     }
   })
 
-  const handleDelete = (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus supplier ini?')) return
+  const handleDelete = async (id: string) => {
+    const ok = await confirm({
+      title: 'Hapus Supplier',
+      message: 'Apakah Anda yakin ingin menghapus supplier ini?',
+      confirmLabel: 'Hapus',
+      danger: true,
+    })
+    if (!ok) return
     deleteMutation.mutate(id)
   }
 

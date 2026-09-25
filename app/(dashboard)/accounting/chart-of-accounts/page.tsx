@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { coaSchema, type CoaFormValues } from '@/lib/validations/accounting'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, BookOpen, X, Loader2, Link2 } from 'lucide-react'
 import type { AccountBalance, AccountType, AccountMapping } from '@/types/database'
@@ -31,6 +32,7 @@ const accountTypeColors: Record<AccountType, string> = {
 // Akun yang dipakai jurnal otomatis (terima PO, bayar supplier, selesai WO, invoice lunas)
 function AutoJournalAccounts({ accounts }: { accounts: AccountBalance[] }) {
   const queryClient = useQueryClient()
+  const toast = useToast()
 
   const { data: mappings = [], isLoading } = useQuery({
     queryKey: ['account_mappings'],
@@ -57,7 +59,7 @@ function AutoJournalAccounts({ accounts }: { accounts: AccountBalance[] }) {
     },
     onError: (err) => {
       console.error('Error updating account mapping:', err)
-      alert(err?.message || 'Gagal menyimpan pemetaan akun')
+      toast.error(err?.message || 'Gagal menyimpan pemetaan akun')
     }
   })
 
@@ -119,6 +121,7 @@ function AutoJournalAccounts({ accounts }: { accounts: AccountBalance[] }) {
 }
 
 export default function ChartOfAccountsPage() {
+  const toast = useToast()
   const queryClient = useQueryClient()
 
   // Modal states
@@ -178,7 +181,7 @@ export default function ChartOfAccountsPage() {
     },
     onError: (err) => {
       console.error('Error creating COA:', err)
-      alert('Gagal menyimpan akun baru')
+      toast.error('Gagal menyimpan akun baru')
     }
   })
 

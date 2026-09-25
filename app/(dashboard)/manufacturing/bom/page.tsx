@@ -7,11 +7,15 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { bomSchema, type BomFormValues } from '@/lib/validations/manufacturing'
 import { FormError } from '@/components/ui/FormError'
 import { supabase } from '@/lib/supabase/supabase'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 import { Plus, ClipboardList, X, Loader2, Trash2 } from 'lucide-react'
 import { formatMaterialLabel, formatProductLabel } from '@/lib/inventory-size'
 
 export default function BomPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
 
   // Modal states
@@ -135,7 +139,7 @@ export default function BomPage() {
     },
     onError: (err) => {
       console.error('Error creating BOM:', err)
-      alert('Gagal membuat Bill of Materials')
+      toast.error('Gagal membuat Bill of Materials')
     }
   })
 
@@ -153,12 +157,18 @@ export default function BomPage() {
     },
     onError: (err) => {
       console.error('Error deleting BOM:', err)
-      alert('Gagal menghapus BOM. Kemungkinan resep ini sedang aktif digunakan oleh Work Order.')
+      toast.error('Gagal menghapus BOM. Kemungkinan resep ini sedang aktif digunakan oleh Work Order.')
     }
   })
 
-  const handleDeleteBOM = (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus BOM ini beserta semua resep di dalamnya?')) return
+  const handleDeleteBOM = async (id: string) => {
+    const ok = await confirm({
+      title: 'Hapus Bill of Materials',
+      message: 'Apakah Anda yakin ingin menghapus BOM ini beserta semua resep di dalamnya?',
+      confirmLabel: 'Hapus',
+      danger: true,
+    })
+    if (!ok) return
     deleteMutation.mutate(id)
   }
 
