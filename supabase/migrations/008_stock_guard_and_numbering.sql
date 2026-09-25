@@ -27,6 +27,9 @@ END $$;
 UPDATE materials SET current_stock = 0 WHERE current_stock IS NULL;
 UPDATE products SET current_stock = 0 WHERE current_stock IS NULL;
 
+-- DROP ... IF EXISTS agar migration aman dijalankan ulang
+ALTER TABLE materials DROP CONSTRAINT IF EXISTS materials_current_stock_nonnegative;
+ALTER TABLE products DROP CONSTRAINT IF EXISTS products_current_stock_nonnegative;
 ALTER TABLE materials
   ALTER COLUMN current_stock SET NOT NULL,
   ADD CONSTRAINT materials_current_stock_nonnegative CHECK (current_stock >= 0);
